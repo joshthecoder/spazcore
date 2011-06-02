@@ -157,146 +157,86 @@ function SpazOAuth(realm, options) {
     this.opts = options;
 };
 
+SpazOAuth.prototype._fetchToken = function(url, onComplete, onError) {
+    var message = {
+        method: 'POST',
+        action: url,
+        parameters: {}
+    }
+
+    OAuth.completeRequest(message, this.opts);
+
+    jQuery.ajax({
+        type: 'POST',
+        url: url,
+        data: message.parameters,
+        dataType: 'text',
+        success: function (data) {
+            var decodedData = OAuth.decodeForm(data);
+            onComplete(OAuth.getParameter(decodedData, 'oauth_token'),
+                       OAuth.getParameter(decodedData, 'oauth_token_secret'));
+        },
+        error: function(xhr, textStatus, errorThrown) {
+            onError(xhr.responseText);
+        },
+        beforeSend: function(xhr) {
+            xhr.setRequestHeader('Cookie', '');
+        }
+    });
+};
+
+/**
+ * Generate an authorization URL to redirect user so they can
+ * authorize us access to their account.
+ *
+ * @param {function} [onComplete] a callback fired to supply the authorization URL once the request token is fetched.
+ * @param {function} [onError] a callback fired if we failed to fetch a request token.
+ */
+SpazOAuth.prototype.getAuthorizationURL = function(onComplete, onError) {
+    var self = this;
+
+    // Callback for providing authorization URL once we have the request token.
+    function createAuthorizationURL(token, secret) {
+        // We will need the request token later when we fetch the access token.
+        self.requestToken = [token, secret];
+
+        // Create the authorization URL by append the oauth_token to the end.
+        var url = self.opts.authorizationURL + '?oauth_token=' + token;
+        onComplete(url);
+    }
+
+    // Fetch a request token from the service provider.
+    this._fetchToken(this.opts.requestURL, createAuthorizationURL, onError);
+};
+
 /**
  * Authorize access to the service by fetching an OAuth access token.
  * 
- * @param {string} username
- * @param {string} password
- * @param {function} [onComplete] a callback to fire on complete. If this is set, the request is asynchronous
- * @returns {boolean} true if authorization successful, otherwise false
+ * @param {string} provide the oauth_verifier value if provided by the user or callback from the service provider.
+ * @param {function} [onComplete] a callback to fire on complete.
+ * @param {function} [onError] a callback for when we fail to fetch the access token.
  */
-SpazOAuth.prototype.authorize = function(username, password, onComplete) {
-	
-	var that = this;
-	
-	var async_mode = false;
-	
-    this.username = username;
+SpazOAuth.prototype.authorize = function() {
+    var verifier, onComplete, onError;
+    if (arguments.length > 2) {
+        verifier = arguments[0];
+        onComplete = arguments[1];
+        onError = arguments[2];
+    } else {
+        verifier = null;
+        onComplete = arguments[0];
+        onError = arguments[1];
+    }
 
-    // Fill in xAuth parameters
-    var parameters = {
-        'x_auth_username': username,
-        'x_auth_password': password,
-        'x_auth_mode': 'client_auth'
-    };
+    var self = this;
 
-    // Sign the request
-    OAuth.completeRequest({
-        method: 'post',
-        action: this.opts.accessURL,
-        parameters: parameters
-    }, this.opts);
+    function success(token, secret) {
+        self.setAccessToken(token, secret);
+        onComplete();
+    }
 
-	if (onComplete) {
-		async_mode = true;
-	}
-
-    // Perform request to fetch access token
-    var accessToken = null;
-	jQuery.ajax({
-		async: async_mode,
-		type: 'post',
-		url: this.opts.accessURL,
-		data: parameters,
-		dataType: 'text',
-		success: function(data, textStatus, xhr) {
-
-			sch.error(xhr);
-
-			sch.error("xhr.responseText:" + xhr.responseText);
-			sch.error("xhr.responseXML:" + xhr.responseXML);
-			sch.error('getAllResponseHeaders:n' + xhr.getAllResponseHeaders());
-
-
-			sch.error("OAuth Data return");
-			sch.error(sch.enJSON(data));
-
-			var results = OAuth.decodeForm(data);
-			sch.error("results");
-			sch.error(sch.enJSON(results));
-			accessToken = {};
-			accessToken.key = OAuth.getParameter(results, 'oauth_token');
-			accessToken.secret = OAuth.getParameter(results, 'oauth_token_secret');
-			
-			that.setAccessToken(accessToken.key, accessToken.secret);
-			
-			if (onComplete) {
-				onComplete.call(this, true, accessToken);
-			}
-
-		},
-		error: function(req, textStatus, error) {
-			sch.error("Failed to fetch oAuth access token: " + req.responseText);
-
-			if (onComplete) {
-				onComplete.call(this, false);
-			}
-			
-		},
-		complete: function(xhr, textStatus) {
-			sch.error('COMPLETE:');
-			sch.error("xhr.responseText:" + xhr.responseText);
-			sch.error("xhr.responseXML:" + xhr.responseXML);
-			sch.error('getAllResponseHeaders:n' + xhr.getAllResponseHeaders());
-
-		},
-		beforeSend: function(xhr) {
-			xhr.setRequestHeader('Accept-Encoding', 'none');
-			xhr.setRequestHeader('Cookie', '');
-
-		}
-
-	});
-	
-	if (async_mode !== true) {
-		if (accessToken != null) {
-			return true;
-	    } else {
-			return false;
-		}
-	} else {
-		return null;
-	}
-	// var request = new Ajax.Request(this.opts.accessURL, {
-	// 	'asynchronous':true,
-	// 	'method':'post',
-	// 	'parameters':parameters,
-	// 	'onSuccess': function(xhr, foo) {
-	// 		sch.error('onSuccess=====================================================');
-	// 		var data = xhr.responseText;
-	// 		sch.error('foo');
-	// 		sch.error(foo);
-	// 		sch.error(xhr);
-	// 	
-	// 		sch.error("xhr.responseText:"+xhr.responseText);
-	// 		sch.error("xhr.responseXML:"+xhr.responseXML);
-	// 		sch.error('getAllResponseHeaders:\n'+xhr.getAllResponseHeaders());		
-	// 	
-	// 		sch.error("OAuth Data return");
-	// 		sch.error(data);
-	// 	
-	//             var results = OAuth.decodeForm(data);
-	// 		sch.error("results");
-	// 		sch.error(sch.enJSON(results));
-	//             accessToken = {};
-	//             accessToken.key = OAuth.getParameter(results, 'oauth_token');
-	//             accessToken.secret = OAuth.getParameter(results, 'oauth_token_secret');
-	// 		sch.error('==============================================================');
-	// 		if (accessToken != null) {
-	// 			that.setAccessToken(accessToken.key, accessToken.secret);
-	// 			onComplete(true);
-	// 	    } else {
-	// 			onComplete(false);
-	// 		}
-	// 	},
-	// 	'onFailure': function(xhr) {
-	// 		sch.error('onFailure=====================================================');
-	// 		sch.error("xhr.responseText:"+xhr.responseText);
-	// 		sch.error('getAllResponseHeaders:\n'+xhr.getAllResponseHeaders());
-	// 		sch.error('==============================================================');
-	// 		onComplete(false);
-	// 	}
-	// });
+    // Attempt to request an access token from the service provider.
+    this._fetchToken(this.opts.accessURL, success, onError);
 };
 
 
